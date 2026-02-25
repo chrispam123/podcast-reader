@@ -1,0 +1,11 @@
+# Librería para extraer transcripciones de YouTube
+youtube-transcript-api
+
+# SDK oficial de Google para usar Gemini
+google-genai
+
+# Para generar el PDF
+fpdf2
+
+# Para leer el archivo .env con las variables de entorno
+python-dotenv

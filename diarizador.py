@@ -5,12 +5,51 @@
 
 import os
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 # Cargar las variables de entorno desde el archivo .env
 load_dotenv()
 
-def configurar_gemini():
+
+def _dividir_en_bloques(texto: str, max_chars: int = 14000) -> list[str]:
+    """
+    Divide la transcripción en bloques para evitar truncamiento por límites
+    de salida del modelo.
+    """
+    palabras = texto.split()
+    if not palabras:
+        return []
+
+    bloques: list[str] = []
+    bloque_actual: list[str] = []
+    largo_actual = 0
+
+    for palabra in palabras:
+        largo_palabra = len(palabra) + (1 if bloque_actual else 0)
+        if largo_actual + largo_palabra > max_chars and bloque_actual:
+            bloques.append(" ".join(bloque_actual))
+            bloque_actual = [palabra]
+            largo_actual = len(palabra)
+        else:
+            bloque_actual.append(palabra)
+            largo_actual += largo_palabra
+
+    if bloque_actual:
+        bloques.append(" ".join(bloque_actual))
+
+    return bloques
+
+def _obtener_modelo_objetivo() -> str:
+    """
+    Devuelve el modelo objetivo para ejecutar una sola llamada a la API.
+    Prioriza GEMINI_MODEL si existe en .env.
+    """
+    modelo_preferido = os.getenv("GEMINI_MODEL")
+    if modelo_preferido:
+        return modelo_preferido
+    return "models/gemini-2.5-flash"
+
+def configurar_gemini() -> tuple[genai.Client, str]:
     """
     Configura el cliente de Gemini con la API key del archivo .env
     """
@@ -23,14 +62,10 @@ def configurar_gemini():
             "Asegúrate de haberla configurado correctamente."
         )
     
-    # Inicializar el SDK de Google con la API key
-    genai.configure(api_key=api_key)
-    
-    # Usar gemini-1.5-pro por su ventana de contexto de 1 millón de tokens
-    modelo = genai.GenerativeModel("gemini-1.5-pro")
-    print("Gemini configurado correctamente.")
-    
-    return modelo
+    cliente = genai.Client(api_key=api_key)
+    modelo = _obtener_modelo_objetivo()
+    print(f"Gemini configurado. Modelo seleccionado: {modelo}")
+    return cliente, modelo
 
 def construir_prompt(transcripcion: str) -> str:
     """
@@ -39,7 +74,8 @@ def construir_prompt(transcripcion: str) -> str:
     """
     return f"""Eres un asistente especializado en analizar transcripciones de podcasts en formato de entrevista.
 
-Tu tarea es analizar la siguiente transcripción y reformatearla identificando quién es el ENTREVISTADOR y quién es el INVITADO.
+Tu tarea es analizar la siguiente transcripción, identificar quién es el ENTREVISTADOR y quién es el INVITADO,
+y traducir TODO el contenido al español.
 
 REGLAS IMPORTANTES:
 1. El ENTREVISTADOR es quien hace las preguntas, introduce temas y cede la palabra.
@@ -56,37 +92,90 @@ INVITADO
 ENTREVISTADOR
 [lo que dice el entrevistador]
 
-5. No agregues explicaciones, encabezados ni comentarios extra, solo la transcripción reformateada.
-6. Si hay una sección de introducción o presentación al inicio, asígnala al ENTREVISTADOR.
-7. Mantén el texto original, no lo traduzcas ni lo resumas.
+5. Todo el contenido debe estar traducido al español natural, manteniendo el sentido original.
+6. No agregues explicaciones, encabezados ni comentarios extra, solo la transcripción reformateada.
+7. Si hay una sección de introducción o presentación al inicio, asígnala al ENTREVISTADOR.
+8. No resumas ni omitas partes; conserva el contenido completo.
 
 TRANSCRIPCIÓN:
 {transcripcion}
 """
 
+
+def construir_prompt_bloque(transcripcion_bloque: str, indice: int, total: int) -> str:
+    """
+    Prompt para traducir + diarizar un bloque de la transcripción.
+    """
+    return f"""Eres un asistente especializado en analizar transcripciones de podcasts en formato de entrevista.
+
+Estás procesando el BLOQUE {indice} de {total} de una transcripción más larga.
+Tu tarea es identificar hablantes y traducir TODO este bloque al español.
+
+REGLAS IMPORTANTES:
+1. El ENTREVISTADOR es quien hace las preguntas, introduce temas y cede la palabra.
+2. El INVITADO es quien responde, desarrolla ideas y comparte experiencias.
+3. Cada vez que cambie el hablante, pon su etiqueta en una línea nueva en mayúsculas.
+4. Traduce todo al español natural, sin resumir ni omitir frases.
+5. No agregues explicaciones ni comentarios extra.
+
+FORMATO DE SALIDA:
+ENTREVISTADOR
+[texto en español]
+
+INVITADO
+[texto en español]
+
+TRANSCRIPCIÓN DEL BLOQUE:
+{transcripcion_bloque}
+"""
+
 def diarizar_transcripcion(transcripcion: str) -> str:
     """
-    Envía la transcripción a Gemini y obtiene el texto diarizado.
+    Envía la transcripción a Gemini y obtiene el texto diarizado y traducido al español.
     Guarda el resultado en outputs/transcripcion_diarizada.txt
     Retorna el texto diarizado como string para usarlo en el siguiente paso.
     """
     print("Iniciando diarización con Gemini...")
     print(f"Tamaño de la transcripción: {len(transcripcion)} caracteres")
+
+    if not transcripcion or not transcripcion.strip():
+        raise RuntimeError(
+            "La transcripción está vacía. Reintenta la extracción antes de diarizar."
+        )
     
-    # Configurar Gemini y obtener el modelo
-    modelo = configurar_gemini()
-    
-    # Construir el prompt con la transcripción incluida
-    prompt = construir_prompt(transcripcion)
+    # Configurar Gemini y obtener cliente + modelo
+    cliente, modelo = configurar_gemini()
+
+    bloques = _dividir_en_bloques(transcripcion)
+    if not bloques:
+        raise RuntimeError("No se pudo dividir la transcripción en bloques válidos.")
+    print(f"Total de bloques a procesar: {len(bloques)}")
+
+    partes_diarizadas: list[str] = []
     
     try:
-        # Enviar el prompt a Gemini y esperar la respuesta
-        # Esto puede tardar varios minutos para transcripciones largas
-        print("Enviando transcripción a Gemini... (puede tardar varios minutos)")
-        respuesta = modelo.generate_content(prompt)
-        
-        # Extraer el texto de la respuesta
-        texto_diarizado = respuesta.text
+        for indice, bloque in enumerate(bloques, start=1):
+            print(f"Enviando bloque {indice}/{len(bloques)} a Gemini...")
+            prompt_bloque = construir_prompt_bloque(bloque, indice, len(bloques))
+            respuesta = cliente.models.generate_content(
+                model=modelo,
+                contents=prompt_bloque,
+            )
+
+            texto_bloque = (getattr(respuesta, "text", "") or "").strip()
+            if not texto_bloque:
+                raise RuntimeError(
+                    f"Gemini devolvió una respuesta vacía en el bloque {indice}/{len(bloques)}."
+                )
+            partes_diarizadas.append(texto_bloque)
+
+        texto_diarizado = "\n\n".join(partes_diarizadas)
+
+        if len(texto_diarizado) < max(200, int(len(transcripcion) * 0.55)):
+            raise RuntimeError(
+                "La salida parece incompleta para el tamaño de la transcripción. "
+                "Reintenta con otro GEMINI_MODEL o ajusta max_chars por bloque."
+            )
         
     except Exception as e:
         raise RuntimeError(f"Error al comunicarse con Gemini: {e}")

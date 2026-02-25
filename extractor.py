@@ -49,16 +49,17 @@ def extraer_transcripcion(url: str) -> str:
     print(f"ID del video detectado: {video_id}")
 
     YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound = _cargar_api_transcripciones()
+    api_cliente = YouTubeTranscriptApi()
 
     try:
         # Intentar obtener transcripción en inglés primero
         # fetch() devuelve una lista de fragmentos con texto y timestamps
-        transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=["en"])
+        transcript = api_cliente.fetch(video_id, languages=["en"])
         print("Transcripción en inglés encontrada.")
     except NoTranscriptFound:
         try:
             # Si no hay en inglés, intentar obtener cualquier transcripción disponible
-            transcript = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript = api_cliente.fetch(video_id)
             print("Transcripción encontrada en idioma alternativo.")
         except TranscriptsDisabled:
             # El video no tiene subtítulos habilitados
@@ -67,7 +68,7 @@ def extraer_transcripcion(url: str) -> str:
 
     # Unir todos los fragmentos de texto en un solo string limpio
     # Cada fragmento tiene 'text', 'start' y 'duration', solo nos interesa el texto
-    texto_completo = " ".join([fragmento["text"] for fragmento in transcript])
+    texto_completo = " ".join([fragmento.text for fragmento in transcript])
 
     # Crear la carpeta outputs/ si no existe
     os.makedirs("outputs", exist_ok=True)

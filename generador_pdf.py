@@ -5,6 +5,48 @@
 import os
 from fpdf import FPDF
 
+
+def _normalizar_texto_pdf(texto: str) -> str:
+    """
+    Convierte caracteres Unicode comunes a equivalentes compatibles con
+    fuentes base de FPDF (latin-1).
+    """
+    reemplazos = {
+        "–": "-",
+        "—": "-",
+        "…": "...",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "•": "-",
+        "\u00a0": " ",
+    }
+    texto_normalizado = texto
+    for origen, destino in reemplazos.items():
+        texto_normalizado = texto_normalizado.replace(origen, destino)
+
+    return texto_normalizado.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def _partir_tokens_largos(texto: str, max_largo_token: int = 60) -> str:
+    """
+    Inserta espacios en tokens extremadamente largos para evitar errores de salto
+    de línea en FPDF cuando no existe espacio horizontal suficiente.
+    """
+    tokens = texto.split(" ")
+    tokens_ajustados: list[str] = []
+
+    for token in tokens:
+        if len(token) <= max_largo_token:
+            tokens_ajustados.append(token)
+            continue
+
+        partes = [token[i : i + max_largo_token] for i in range(0, len(token), max_largo_token)]
+        tokens_ajustados.append(" ".join(partes))
+
+    return " ".join(tokens_ajustados)
+
 class GeneradorPodcastPDF(FPDF):
     """
     Clase que extiende FPDF para personalizar el diseño del PDF.
@@ -16,7 +58,7 @@ class GeneradorPodcastPDF(FPDF):
         super().__init__(orientation="P", unit="mm", format="A4")
         
         # Guardar el título para usarlo en el encabezado
-        self.titulo_podcast = titulo_podcast
+        self.titulo_podcast = _normalizar_texto_pdf(titulo_podcast)
         
         # Márgenes: izquierda, arriba, derecha
         self.set_margins(20, 25, 20)
@@ -103,7 +145,14 @@ def generar_pdf(texto_diarizado: str, titulo_podcast: str = "Podcast Transcript"
     # Título principal en la primera página
     pdf.set_font("Helvetica", style="B", size=18)
     pdf.set_text_color(30, 30, 30)
-    pdf.cell(0, 15, titulo_podcast, align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(
+        0,
+        15,
+        _partir_tokens_largos(_normalizar_texto_pdf(titulo_podcast)),
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
     pdf.ln(5)
     
     # Procesar el texto diarizado en líneas clasificadas
@@ -114,6 +163,7 @@ def generar_pdf(texto_diarizado: str, titulo_podcast: str = "Podcast Transcript"
         if tipo == "etiqueta":
             # Espacio antes de cada etiqueta para separar visualmente los turnos
             pdf.ln(4)
+            pdf.set_x(pdf.l_margin)
             
             # Color diferente para cada hablante para identificarlos visualmente
             if contenido == "ENTREVISTADOR":
@@ -125,16 +175,23 @@ def generar_pdf(texto_diarizado: str, titulo_podcast: str = "Podcast Transcript"
             
             # Etiqueta en negrita y tamaño ligeramente mayor
             pdf.set_font("Helvetica", style="B", size=11)
-            pdf.cell(0, 7, contenido, new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(
+                0,
+                7,
+                _partir_tokens_largos(_normalizar_texto_pdf(contenido)),
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
         
         else:
             # Texto normal del hablante en color negro estándar
             pdf.set_text_color(40, 40, 40)
             pdf.set_font("Helvetica", size=10)
+            pdf.set_x(pdf.l_margin)
             
             # multi_cell permite que el texto haga salto de línea automático
             # cuando llega al margen derecho
-            pdf.multi_cell(0, 6, contenido)
+            pdf.multi_cell(0, 6, _partir_tokens_largos(_normalizar_texto_pdf(contenido)))
     
     # Crear la carpeta outputs/ si no existe
     os.makedirs("outputs", exist_ok=True)
