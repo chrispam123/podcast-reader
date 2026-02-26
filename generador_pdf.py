@@ -3,6 +3,7 @@
 # en un archivo PDF limpio y legible en cualquier visor de PDF
 
 import os
+from datetime import datetime
 from fpdf import FPDF
 
 
@@ -68,23 +69,9 @@ class GeneradorPodcastPDF(FPDF):
     
     def header(self):
         """
-        Encabezado que aparece en todas las páginas con el título del podcast.
+        Encabezado deshabilitado para evitar texto repetido en cada página.
         """
-        # Fuente del encabezado: negrita, tamaño 10
-        self.set_font("Helvetica", style="B", size=10)
-        
-        # Color gris para el encabezado para no distraer del contenido
-        self.set_text_color(120, 120, 120)
-        
-        # Escribir el título centrado
-        self.cell(0, 10, self.titulo_podcast, align="C", new_x="LMARGIN", new_y="NEXT")
-        
-        # Línea separadora debajo del encabezado
-        self.set_draw_color(200, 200, 200)
-        self.line(20, self.get_y(), 190, self.get_y())
-        
-        # Espacio después del encabezado
-        self.ln(5)
+        return
     
     def footer(self):
         """
@@ -128,7 +115,11 @@ def procesar_lineas(texto_diarizado: str) -> list:
     return resultado
 
 
-def generar_pdf(texto_diarizado: str, titulo_podcast: str = "Podcast Transcript") -> str:
+def generar_pdf(
+    texto_diarizado: str,
+    titulo_podcast: str = "Podcast Transcript",
+    ruta_salida: str | None = None,
+) -> str:
     """
     Genera el PDF final a partir del texto diarizado.
     Guarda el resultado en outputs/podcast_final.pdf
@@ -197,7 +188,9 @@ def generar_pdf(texto_diarizado: str, titulo_podcast: str = "Podcast Transcript"
     os.makedirs("outputs", exist_ok=True)
     
     # Guardar el PDF en la carpeta outputs
-    ruta_salida = "outputs/podcast_final.pdf"
+    if not ruta_salida:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ruta_salida = f"outputs/podcast_final_{timestamp}.pdf"
     pdf.output(ruta_salida)
     
     print(f"PDF generado correctamente en: {ruta_salida}")

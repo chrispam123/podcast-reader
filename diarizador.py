@@ -129,7 +129,7 @@ TRANSCRIPCIÓN DEL BLOQUE:
 {transcripcion_bloque}
 """
 
-def diarizar_transcripcion(transcripcion: str) -> str:
+def diarizar_transcripcion(transcripcion: str, ruta_salida: str | None = None) -> str:
     """
     Envía la transcripción a Gemini y obtiene el texto diarizado y traducido al español.
     Guarda el resultado en outputs/transcripcion_diarizada.txt
@@ -184,7 +184,8 @@ def diarizar_transcripcion(transcripcion: str) -> str:
     os.makedirs("outputs", exist_ok=True)
     
     # Guardar la transcripción diarizada en un archivo .txt
-    ruta_salida = "outputs/transcripcion_diarizada.txt"
+    if not ruta_salida:
+        ruta_salida = "outputs/transcripcion_diarizada.txt"
     with open(ruta_salida, "w", encoding="utf-8") as archivo:
         archivo.write(texto_diarizado)
     
