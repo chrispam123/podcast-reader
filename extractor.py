@@ -39,7 +39,7 @@ def obtener_id_video(url: str) -> str:
     else:
         raise ValueError("URL de YouTube no válida")
 
-def extraer_transcripcion(url: str) -> str:
+def extraer_transcripcion(url: str, ruta_salida: str | None = None) -> str:
     """
     Extrae la transcripción completa del video y la guarda en outputs/transcripcion_cruda.txt
     Retorna el texto completo como string para usarlo en el siguiente paso.
@@ -74,7 +74,8 @@ def extraer_transcripcion(url: str) -> str:
     os.makedirs("outputs", exist_ok=True)
 
     # Guardar la transcripción cruda en un archivo .txt
-    ruta_salida = "outputs/transcripcion_cruda.txt"
+    if not ruta_salida:
+        ruta_salida = "outputs/transcripcion_cruda.txt"
     with open(ruta_salida, "w", encoding="utf-8") as archivo:
         archivo.write(texto_completo)
 

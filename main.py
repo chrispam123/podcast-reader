@@ -5,9 +5,16 @@
 
 import sys
 import os
-from extractor import extraer_transcripcion
+import re
+from datetime import datetime
+from extractor import extraer_transcripcion, obtener_id_video
 from diarizador import diarizar_transcripcion
 from generador_pdf import generar_pdf
+
+
+def _slugify(texto: str) -> str:
+    texto_limpio = re.sub(r"[^a-zA-Z0-9_-]+", "_", texto.strip())
+    return texto_limpio.strip("_") or "podcast"
 
 def main():
     """
@@ -23,6 +30,7 @@ def main():
     
     # Obtener la URL desde los argumentos de la terminal
     url = sys.argv[1]
+    video_id = obtener_id_video(url)
 
     # Controla si se permite usar transcripción cruda cuando falla Gemini.
     # Por defecto está desactivado para evitar PDFs sin diarización.
@@ -40,6 +48,7 @@ def main():
     print("PODCAST READER - Pipeline de transcripción")
     print("=" * 60)
     print(f"URL: {url}")
+    print(f"Video ID: {video_id}")
     print(f"Título: {titulo}")
     print("=" * 60)
     
@@ -48,7 +57,7 @@ def main():
     
     # Verificar si ya existe una transcripción cruda guardada
     # para evitar llamadas innecesarias a YouTube
-    ruta_cruda = "outputs/transcripcion_cruda.txt"
+    ruta_cruda = f"outputs/{video_id}_transcripcion_cruda.txt"
     
     if os.path.exists(ruta_cruda):
         # Si ya existe, leerla directamente sin volver a descargar
@@ -57,10 +66,10 @@ def main():
             transcripcion_cruda = archivo.read()
         if not transcripcion_cruda.strip():
             print("La transcripción cruda existente está vacía. Reextrayendo desde YouTube...")
-            transcripcion_cruda = extraer_transcripcion(url)
+            transcripcion_cruda = extraer_transcripcion(url, ruta_salida=ruta_cruda)
     else:
         # Si no existe, extraerla desde YouTube
-        transcripcion_cruda = extraer_transcripcion(url)
+        transcripcion_cruda = extraer_transcripcion(url, ruta_salida=ruta_cruda)
     
     print(f"✓ Transcripción cruda lista ({len(transcripcion_cruda)} caracteres)")
     
@@ -69,7 +78,7 @@ def main():
     
     # Verificar si ya existe una transcripción diarizada guardada
     # para evitar llamadas innecesarias a la API de Gemini
-    ruta_diarizada = "outputs/transcripcion_diarizada.txt"
+    ruta_diarizada = f"outputs/{video_id}_transcripcion_diarizada.txt"
     
     if os.path.exists(ruta_diarizada):
         # Si ya existe, leerla directamente sin volver a llamar a Gemini
@@ -79,7 +88,7 @@ def main():
         if not transcripcion_diarizada.strip():
             print("La transcripción diarizada existente está vacía. Regenerando con Gemini...")
             try:
-                transcripcion_diarizada = diarizar_transcripcion(transcripcion_cruda)
+                transcripcion_diarizada = diarizar_transcripcion(transcripcion_cruda, ruta_salida=ruta_diarizada)
             except RuntimeError as error:
                 if permitir_fallback_crudo:
                     print(f"Aviso: falló la diarización ({error}). Se usará la transcripción completa sin diarizar.")
@@ -95,7 +104,7 @@ def main():
                 "respecto a la transcripción cruda. Regenerando con Gemini..."
             )
             try:
-                transcripcion_diarizada = diarizar_transcripcion(transcripcion_cruda)
+                transcripcion_diarizada = diarizar_transcripcion(transcripcion_cruda, ruta_salida=ruta_diarizada)
             except RuntimeError as error:
                 if permitir_fallback_crudo:
                     print(f"Aviso: falló la diarización ({error}). Se usará la transcripción completa sin diarizar.")
@@ -108,7 +117,7 @@ def main():
     else:
         # Si no existe, diarizarla con Gemini
         try:
-            transcripcion_diarizada = diarizar_transcripcion(transcripcion_cruda)
+            transcripcion_diarizada = diarizar_transcripcion(transcripcion_cruda, ruta_salida=ruta_diarizada)
         except RuntimeError as error:
             if permitir_fallback_crudo:
                 print(f"Aviso: falló la diarización ({error}). Se usará la transcripción completa sin diarizar.")
@@ -121,14 +130,13 @@ def main():
 
     # Verificación mínima de diarización para evitar PDF "normal" sin etiquetas.
     if not permitir_fallback_crudo:
-        contiene_etiquetas = (
-            "ENTREVISTADOR" in transcripcion_diarizada
-            and "INVITADO" in transcripcion_diarizada
-        )
+        contiene_entrevistador = "ENTREVISTADOR" in transcripcion_diarizada
+        contiene_invitado = "INVITADO" in transcripcion_diarizada
+        contiene_etiquetas = contiene_entrevistador or contiene_invitado
         ratio_actual = len(transcripcion_diarizada.strip()) / max(1, len(transcripcion_cruda.strip()))
         if not contiene_etiquetas:
             raise RuntimeError(
-                "La salida no parece diarizada (faltan etiquetas ENTREVISTADOR/INVITADO). "
+                "La salida no parece diarizada (faltan etiquetas de hablante). "
                 "No se generó PDF para evitar un resultado incorrecto."
             )
         if ratio_actual < ratio_minimo_diarizacion:
@@ -141,7 +149,14 @@ def main():
     
     # PASO 3: Generar el PDF final
     print("\n[PASO 3/3] Generando PDF...")
-    ruta_pdf = generar_pdf(transcripcion_diarizada, titulo_podcast=titulo)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    titulo_slug = _slugify(titulo)
+    ruta_pdf = f"outputs/{video_id}_{titulo_slug}_{timestamp}.pdf"
+    ruta_pdf = generar_pdf(
+        transcripcion_diarizada,
+        titulo_podcast=titulo,
+        ruta_salida=ruta_pdf,
+    )
     
     print(f"✓ PDF generado en: {ruta_pdf}")
     
@@ -149,9 +164,9 @@ def main():
     print("\n" + "=" * 60)
     print("PIPELINE COMPLETADO EXITOSAMENTE")
     print("=" * 60)
-    print(f"  Transcripción cruda:    outputs/transcripcion_cruda.txt")
-    print(f"  Transcripción diarizada: outputs/transcripcion_diarizada.txt")
-    print(f"  PDF final:              outputs/podcast_final.pdf")
+    print(f"  Transcripción cruda:    {ruta_cruda}")
+    print(f"  Transcripción diarizada: {ruta_diarizada}")
+    print(f"  PDF final:              {ruta_pdf}")
     print("=" * 60)
 
 # Punto de entrada del script
